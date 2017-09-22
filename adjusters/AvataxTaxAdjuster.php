@@ -11,27 +11,36 @@ class AvataxTaxAdjuster implements Commerce_AdjusterInterface {
 
   public function adjust(Commerce_OrderModel &$order, array $lineItems = []){
 
-    if( $order->shippingMethodHandle !== NULL && sizeof($order->lineItems) > 0)
+    if( $order->shippingAddress && $order->shippingMethodHandle !== NULL && sizeof($order->lineItems) > 0)
     {
       $taxService = new SalesTaxService;
 
-      $salesTax = $taxService->createSalesOrder($order);
+      $taxResult = $taxService->createSalesOrder($order);
 
-      $order->baseTax = $order->baseTax + $salesTax;
+      if($taxResult)
+      {
+        $order->baseTax = $order->baseTax + $taxResult->totalTax;
 
-      $taxAdjuster = new Commerce_OrderAdjustmentModel();
+        $taxAdjuster = new Commerce_OrderAdjustmentModel();
 
-      $taxAdjuster->type = "Tax";
-      $taxAdjuster->name = "Sales Tax";
-      $taxAdjuster->description = "Adds $".$salesTax." of tax to the order";
-      $taxAdjuster->amount = +$salesTax;
-      $taxAdjuster->orderId = $order->id;
-      // If your Adjuster affects lineItems rather than the total, you record the ids here
-      $taxAdjuster->optionsJson = [ 'lineItemsAffected' => null ];
-      $taxAdjuster->included = false;
+        $taxAdjuster->type = "Tax";
+        $taxAdjuster->name = $taxResult->summary[0]->taxName;
+        $taxAdjuster->description = "Adds $".$taxResult->totalTax." of tax to the order";
+        $taxAdjuster->amount = +$taxResult->totalTax;
+        $taxAdjuster->orderId = $order->id;
+        // If your Adjuster affects lineItems rather than the total, you record the ids here
+        $taxAdjuster->optionsJson = ['service' => 'avatax', 'lineItemsAffected' => null ];
+        $taxAdjuster->included = false;
 
-      return [$taxAdjuster];
+        return [$taxAdjuster];
+      }
+
+      // no sales tax returned
+      return [];
+
     } else {
+
+      // shippming method specified or order does not contain line items
       return [];
     };
   }

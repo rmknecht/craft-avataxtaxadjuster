@@ -37,7 +37,67 @@ class AvataxTaxAdjusterPlugin extends BasePlugin
 
         require __DIR__.'/vendor/autoload.php';
 
+        craft()->on('commerce_payments.onBeforeGatewayRequestSend', [$this, 'onBeforeGatewayRequestSend']);
+
         craft()->on('commerce_orders.onBeforeOrderComplete', [$this, 'onBeforeOrderComplete']);
+    }
+
+    /**
+     * Raised before an order is saved and transaction request is made.
+     * If Avatax is used and and a avatax adjuster does not exist on the order, prevent the transaction from completing.
+     */
+    public function onBeforeGatewayRequestSend(Event $event)
+    {
+        $transaction = $event->params['transaction'];
+        $order = $transaction->order;
+
+        $avataxCategory = FALSE;
+        $avataxAdjuster = FALSE;
+
+        /**
+         *  Determine if the adjuster should be present
+         *      - check if any line item in the order has a tax category of "avatax"
+        **/
+
+        foreach ($order->lineItems as $lineItem)
+        {
+            // Our product has the avatax tax category specified
+            if( strtolower($lineItem->taxCategory) == 'avatax' )
+            {
+                $avataxCategory = TRUE;
+                break;
+            }
+        }
+
+        /**
+         *  If tax category of "avatax" exsits in order, check for adjustments with optionsJson[service] = "avatax" set.
+        **/
+
+        if($avataxCategory)
+        {
+           //die("<pre>".print_r($order->adjustments, 1)."</pre>");
+
+            foreach ($order->adjustments as $adjustment)
+            {
+                if(isset($adjustment->optionsJson['service']) && $adjustment->optionsJson['service'] == 'avatax')
+                {
+                    $avataxAdjuster = TRUE;
+                    break;
+                }
+            }
+        }
+
+
+        /**
+         * If we have avatax category products, but no adjustment with an optionsJson['service'] = "avatax", the avatax adjuster has not returned a tax value.
+         * Do not proceed with the checkout.
+        **/
+        if($avataxCategory && !$avataxAdjuster)
+        {
+            $order->addError('avataxTaxAdjuster', 'Sales tax value not found.');
+            $transaction->message = "Internal server error. Sales tax could not be determined.";
+            $event->performAction = false;
+        }
     }
 
     /**

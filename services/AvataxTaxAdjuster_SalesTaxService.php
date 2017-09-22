@@ -189,10 +189,12 @@ class AvataxTaxAdjuster_SalesTaxService extends BaseApplicationComponent
                 $order->shippingAddress->getCountry()->iso
             );
 
-        // Add each line item to the transaction
+        // Add each line item to the transaction if it has an 'avatax' tax category, then count how many products are taxable.
+        $i = 0;
+
         foreach ($order->lineItems as $lineItem) {
             // Our product has the avatax tax category specified
-            if($lineItem->taxCategory == 'Avatax'){
+            if(strtolower($lineItem->taxCategory) == 'avatax'){
 
                 $taxCode = 'P0000000';
 
@@ -207,28 +209,36 @@ class AvataxTaxAdjuster_SalesTaxService extends BaseApplicationComponent
                     $lineItem->id,          // Item Code
                     $taxCode                // Tax Code - System or Custom Tax Code. Default (P0000000) is assumed.
                 );
+
+               $i++;
            }
         }
 
-        // Add shipping cost as line-item
-        $t = $t->withLine(
-            $order->totalShippingCost,  // total amount for the line item
-            1,                          // quantity
-            "FR",                       // Item Code
-            "FR"                        // Tax code for freight - Shipping only, common carrier - FOB destination
-        );
+        // If we have taxable line items, add the total shipping cost as a line item, and send the request
+        if($i > 0) {
+            $t = $t->withLine(
+                $order->totalShippingCost,  // total amount for the line item
+                1,                          // quantity
+                "FR",                       // Item Code
+                "FR"                        // Tax code for freight - Shipping only, common carrier - FOB destination
+            );
 
-        $t = $t->create();
-
-        if(isset($t->totalTax))
-        {
-            return $t->totalTax;
+            $t = $t->create();
+        } else {
+            // we don't have avatax taxable line items, we can exit
+            return false;
         }
 
-        // Request failed
-        throw new HttpException(400, 'Request could not be completed');
+        // if our transaction has a tax value, return the transaction
+        if(isset($t->totalTax))
+        {
+            return $t;
+        }
 
-        Craft::log('Request to avatax.com failed', LogLevel::Error, false, 'AvataxTaxAdjuster');
+        // Request to avatax failed - we did not recieve a tax value.
+        craft()->userSession->setFlash('error', 'Could not retrieve sales tax.');
+
+        Craft::log($t, LogLevel::Error, false, 'AvataxTaxAdjuster');
 
         return false;
     }
